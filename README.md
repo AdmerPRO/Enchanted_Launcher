@@ -57,6 +57,33 @@ The project is actively developed. If you encounter issues, please report them i
 
 ---
 
+## Starter mod pack
+
+We are currently using the following mods:
+- AppleSkin
+- Armor Hud Numbers
+- Better Hurt Cam
+- Collective
+- Fabulously Optimized (mod pack)
+- Gui Effect Timer
+- Hero's Anchor Optimizer
+- In-Game Account Switcher
+- Fabric API
+- Sodium
+- Marlow's Crystal Optimizer
+- ModMenu
+- Shield Fixes
+- Shield Status
+- TotemCounter
+- Ukulib
+- Uku's Armor Hud
+- ViaFabricPlus
+- WalksyLib
+
+**Not every Minecraft version has all the listed mods**
+
+---
+
 ## License
 
 This project is licensed under the **MIT License**.  
