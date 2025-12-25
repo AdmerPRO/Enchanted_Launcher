@@ -1,0 +1,463 @@
+import minecraft_launcher_lib as mc
+import subprocess
+import re
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
+import shutil
+import traceback
+import json
+import sys
+
+minecraft_proc = None
+
+mc_dir = Path(mc.utils.get_minecraft_directory())
+mods_root = launcher_dir / "mods"
+mods_root.mkdir(exist_ok=True)
+
+ALLOWED_VERSIONS = [
+    "1.16.2",
+    "1.17.1",
+    "1.18.2",
+    "1.20.2",
+    "1.21.2",
+    "1.21.8",
+    "1.21.10"
+]
+
+HIGHLIGHT_VERSION = "1.21.8"
+
+if getattr(sys, 'frozen', False):
+    # if running as exe file
+    launcher_dir = Path(sys.executable).parent
+else:
+    # if running as py file
+    launcher_dir = Path(__file__).parent
+
+CONFIG_FILE = launcher_dir / "launcher_config.json"
+
+# ------------------ MOD PACK HELPERS ------------------
+
+def get_mod_display_name(filename: str):
+    """Removes 'locked_el-' prefix for display in GUI"""
+    if filename.startswith("locked_el-"):
+        return filename.replace("locked_el-", "")
+    return filename
+
+def copy_active_mods(src_dir: Path, dst_dir: Path):
+    """Copy .jar and .mrpack mods from src_dir to dst_dir"""
+    if not src_dir.exists():
+        return
+    for f in src_dir.iterdir():
+        if f.suffix in (".jar", ".mrpack") and not f.name.endswith(".disabled"):
+            shutil.copy(f, dst_dir / f"tmp_el_{f.name}")
+
+# ------------------ CONFIG LOADERS ------------------
+
+def load_config():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_config(data: dict):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+# ------------------ LOGIC ------------------
+
+def sync_version_to_mods(version):
+    global mods_preview_version
+    if version in mods_version_combo["values"]:
+        mods_version_combo.set(version)
+        mods_preview_version = version
+        refresh_mods_list()
+
+def list_fabric_versions():
+    print("=== Installed Fabric Versions ===")
+    installed_versions = mc.utils.get_installed_versions(str(mc_dir))
+    for idx, v in enumerate(ALLOWED_VERSIONS):
+        matching_ids = [
+            iv["id"] for iv in installed_versions
+            if iv.get("id", "").startswith("fabric-loader") and v in iv.get("id", "")
+        ]
+        if matching_ids:
+            for mid in matching_ids:
+                print(f"[{idx}] Version {v} -> ID: {mid}")
+        else:
+            print(f"[{idx}] Version {v} -> Not installed")
+    print("================================")
+
+
+list_fabric_versions()
+
+
+def valid_username(name: str) -> bool:
+    return 3 <= len(name) <= 12 and re.fullmatch(r"[A-Za-z0-9_]+", name)
+
+
+def fabric_id_for(version: str) -> str | None:
+    for v in mc.utils.get_installed_versions(str(mc_dir)):
+        if v.get("id", "").startswith("fabric-loader") and version in v.get("id", ""):
+            return v["id"]
+    return None
+
+
+def install_fabric(version):
+    try:
+        mc.fabric.install_fabric(version, str(mc_dir))
+        refresh_versions()
+        refresh_mods_versions()
+        messagebox.showinfo("Success", f"Fabric {version} installed")
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+def prepare_mods(version: str):
+    mc_mods = mc_dir / "mods"
+    mc_mods.mkdir(exist_ok=True)
+
+    temp_mods = mods_root / "temp-mods"
+    temp_mods.mkdir(exist_ok=True)
+
+    # Move all user mods and enchanted mods to temp
+    for ext in ("*.jar", "*.mrpack"):
+        for f in mc_mods.glob(ext):
+            shutil.move(f, temp_mods / f.name)
+
+    # Copy user mods
+    user_dir = mods_root / f"fabric-{version}"
+    copy_active_mods(user_dir, mc_mods)
+
+    # Copy enchanted mods
+    enchanted_dir = mods_root / "enchanted-packs" / f"fabric-{version}"
+    copy_active_mods(enchanted_dir, mc_mods)
+
+def restore_mods():
+    mc_mods = mc_dir / "mods"
+    temp_mods = mods_root / "temp-mods"
+
+    # remove temporary mods
+    for ext in ("tmp_el_*.jar", "tmp_el_*.mrpack"):
+        for f in mc_mods.glob(ext):
+            f.unlink(missing_ok=True)
+
+    # restore original mods
+    for ext in ("*.jar", "*.mrpack"):
+        for f in temp_mods.glob(ext):
+            shutil.move(f, mc_mods / f.name)
+
+
+def launch_game():
+    try:
+        username = username_entry.get().strip()
+
+        config = load_config()
+        config["username"] = username
+        save_config(config)
+
+        version_idx = versions_list.curselection()
+        if version_idx:
+            version = versions_list.get(version_idx[0])
+            print(version)
+            print(version_idx)
+        else:
+            version = None
+
+        print(f"[DEBUG] Selected username: '{username}'")
+        print(f"[DEBUG] Selected version index: {version_idx}, value: {version}")
+
+        if not username or not valid_username(username):
+            messagebox.showwarning("Invalid username", "Username must be 3–12 characters (A–Z, 0–9, _)")
+            print("[DEBUG] Invalid username")
+            return
+
+        if not version:
+            messagebox.showwarning("Version", "Select a version")
+            print("[DEBUG] No version selected")
+            return
+
+        print("[DEBUG] Preparing mods...")
+        prepare_mods(version)
+        print("[DEBUG] Mods prepared")
+
+        settings = {
+            "username": username,
+            "uuid": "17cadab7-deb2-4208-90fa-16d2df7d072b", 
+            "token": "offline"
+        }
+
+        version_id = fabric_id_for(version)
+
+        print(version_id)
+
+        print("[DEBUG] Creating Minecraft launch command...")
+        cmd = mc.command.get_minecraft_command(version_id, mc_dir, settings)
+        print(f"[DEBUG] Command: {cmd}")
+
+        def run_game():
+            print("[DEBUG] Launching Minecraft...")
+            global minecraft_proc
+            minecraft_proc = subprocess.Popen(cmd, cwd=str(mc_dir))
+            minecraft_proc.wait()
+            print("[DEBUG] Minecraft exited, restoring mods...")
+            restore_mods()
+            print("[DEBUG] Mods restored")
+
+        threading.Thread(target=run_game, daemon=True).start()
+
+    except Exception as e:
+        print("[DEBUG] Exception occurred during launch_game:")
+        traceback.print_exc()
+        messagebox.showerror("Launch Error", str(e))
+
+def set_active_version(version):
+    config = load_config()
+    config["last_version"] = version
+    save_config(config)
+
+    sync_version_to_mods(version)
+
+# ------------------ GUI ------------------
+
+def on_close():
+    global minecraft_proc
+    if minecraft_proc and minecraft_proc.poll() is None:
+        # Use a custom Toplevel for Yes/No style buttons
+        warning = tk.Toplevel(root)
+        warning.title("Warning")
+        warning.geometry("400x180")
+        warning.grab_set()  # modal window
+
+        tk.Label(
+            warning, 
+            text="WARNING! Closing the Launcher will also close Minecraft.\n"
+                 "This may cause issues with mods.\n"
+                 "In the worst case, it may prevent Minecraft Fabric from launching (Temporary).",
+            wraplength=380
+        ).pack(pady=20)
+
+        btn_frame = tk.Frame(warning)
+        btn_frame.pack(pady=10)
+
+        def cancel():
+            warning.destroy()
+
+        def close_launcher():
+            warning.destroy()
+            if minecraft_proc and minecraft_proc.poll() is None:
+                minecraft_proc.terminate()  # or kill()
+                minecraft_proc.wait()
+                restore_mods()
+            root.destroy()
+
+        tk.Button(btn_frame, text="Cancel", command=cancel).pack(side="left", padx=10)
+        tk.Button(btn_frame, text="Close", command=close_launcher).pack(side="left", padx=10)
+    else:
+        root.destroy()
+
+
+root = tk.Tk()
+root.title("Enchanted Launcher")
+root.geometry("640x480")
+
+root.protocol("WM_DELETE_WINDOW", on_close)
+
+notebook = ttk.Notebook(root)
+notebook.pack(fill="both", expand=True)
+
+# ===== TAB: LAUNCH =====
+launch_tab = ttk.Frame(notebook)
+notebook.add(launch_tab, text="Launch")
+
+ttk.Label(launch_tab, text="Username").pack(pady=(10, 2))
+username_entry = ttk.Entry(launch_tab, width=30)
+username_entry.pack()
+
+config = load_config()
+if "username" in config:
+    username_entry.insert(0, config["username"])
+
+last_version = config.get("last_version")
+mods_preview_version = last_version
+
+ttk.Label(launch_tab, text="Versions").pack(pady=(10, 2))
+versions_list = tk.Listbox(launch_tab, height=8)
+versions_list.pack(fill="x", padx=20)
+
+def on_version_select(event):
+    sel = versions_list.curselection()
+    if not sel:
+        return
+
+    version = versions_list.get(sel[0])
+    set_active_version(version)
+
+versions_list.bind("<<ListboxSelect>>", on_version_select)
+
+
+install_frame = ttk.Frame(launch_tab)
+install_frame.pack(pady=10)
+install_combo = ttk.Combobox(install_frame, values=ALLOWED_VERSIONS, state="readonly")
+install_combo.set(ALLOWED_VERSIONS[0])
+install_combo.pack(side="left", padx=5)
+
+ttk.Button(
+    install_frame,
+    text="Install Fabric",
+    command=lambda: threading.Thread(target=install_fabric, args=(install_combo.get(),), daemon=True).start()
+).pack(side="left", padx=5)
+
+ttk.Button(launch_tab, text="Launch Minecraft", command=launch_game).pack(pady=10)
+
+# ===== TAB: MODS =====
+mods_tab = ttk.Frame(notebook)
+notebook.add(mods_tab, text="Mods")
+
+mods_version_combo = ttk.Combobox(mods_tab, state="readonly")
+mods_version_combo.pack(pady=10)
+mods_list = tk.Listbox(mods_tab)
+mods_list.pack(fill="both", expand=True, padx=20, pady=5)
+
+
+def refresh_mods_versions():
+    versions = [v for v in ALLOWED_VERSIONS if fabric_id_for(v)]
+    mods_version_combo["values"] = versions
+
+
+def refresh_mods_list():
+    mods_list.delete(0, tk.END)
+    v = mods_preview_version
+    if not v:
+        return
+
+    paths = [
+        mods_root / f"fabric-{v}",
+        mods_root / "enchanted-packs" / f"fabric-{v}"
+    ]
+
+    for path in paths:
+        if not path.exists():
+            continue
+
+        for f in path.iterdir():
+            display = get_mod_display_name(f.name)
+            idx = mods_list.size()
+            mods_list.insert(tk.END, display)
+
+            # Color coding
+            if f.name.startswith("locked_el-"):
+                mods_list.itemconfig(idx, bg="#add8e6")  # light blue = locked
+            elif f.name.endswith(".disabled"):
+                mods_list.itemconfig(idx, bg="#fcb6b6")  # red = disabled
+            else:
+                mods_list.itemconfig(idx, bg="#b6fcb6")  # green = enabled
+
+def toggle_mod(enable: bool):
+    sel = mods_list.curselection()
+    if not sel:
+        return
+
+    v = mods_version_combo.get()
+    name = mods_list.get(sel)
+
+    paths = [
+        mods_root / f"fabric-{v}",
+        mods_root / "enchanted-packs" / f"fabric-{v}"
+    ]
+
+    for path in paths:
+        if not path.exists():
+            continue
+
+        for f in path.iterdir():
+            if get_mod_display_name(f.name) == name:
+
+                if f.name.startswith("locked_el-"):
+                    messagebox.showwarning("Locked mod", "This mod cannot be disabled")
+                    return
+
+                if enable and f.name.endswith(".disabled"):
+                    f.rename(f.with_suffix(""))
+                elif not enable and not f.name.endswith(".disabled"):
+                    f.rename(f.with_name(f.name + ".disabled"))
+
+                refresh_mods_list()
+                return
+
+def add_mod():
+    v = mods_version_combo.get()
+    if not v:
+        return
+    path = filedialog.askopenfilename(filetypes=[("Jar", "*.jar")])
+    if path:
+        shutil.copy(path, mods_root / f"fabric-{v}" / Path(path).name)
+        refresh_mods_list()
+
+
+def remove_mod():
+    sel = mods_list.curselection()
+    if not sel:
+        return
+    v = mods_version_combo.get()
+    f = mods_root / f"fabric-{v}" / mods_list.get(sel)
+    f.unlink(missing_ok=True)
+    refresh_mods_list()
+
+mods_btns = ttk.Frame(mods_tab)
+mods_btns.pack(pady=5)
+
+ttk.Button(mods_btns, text="Add Mod", command=add_mod).pack(side="left", padx=5)
+ttk.Button(mods_btns, text="Remove Mod", command=remove_mod).pack(side="left", padx=5)
+ttk.Button(mods_btns, text="Enable Mod", command=lambda: toggle_mod(True)).pack(side="left", padx=5)
+ttk.Button(mods_btns, text="Disable Mod", command=lambda: toggle_mod(False)).pack(side="left", padx=5)
+
+def on_mods_version_change(event):
+    global mods_preview_version
+    v = mods_version_combo.get()
+    mods_preview_version = v
+    refresh_mods_list()
+
+mods_version_combo.bind("<<ComboboxSelected>>", on_mods_version_change)
+
+
+# ------------------ REFRESH ------------------
+
+def refresh_versions():
+    versions_list.delete(0, tk.END)
+
+    for v in ALLOWED_VERSIONS:
+        idx = versions_list.size()
+        versions_list.insert(tk.END, v)
+
+        is_installed = fabric_id_for(v) is not None
+
+        if v == HIGHLIGHT_VERSION:
+            if is_installed:
+                versions_list.itemconfig(idx, bg="#FFD700")  # gold
+            else:
+                versions_list.itemconfig(idx, bg="#ADD8E6")  # light blue
+        else:
+            if is_installed:
+                versions_list.itemconfig(idx, bg="#b6fcb6")  # green
+            else:
+                versions_list.itemconfig(idx, bg="#fcb6b6")  # red
+
+    config = load_config()
+    last = config.get("last_version")
+
+    if last in ALLOWED_VERSIONS:
+        idx = ALLOWED_VERSIONS.index(last)
+        versions_list.selection_set(idx)
+        versions_list.activate(idx)
+        versions_list.see(idx)
+        sync_version_to_mods(last) 
+        set_active_version(last)
+
+refresh_versions()
+refresh_mods_versions()
+
+root.mainloop()
