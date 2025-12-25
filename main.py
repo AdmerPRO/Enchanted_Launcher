@@ -13,8 +13,6 @@ import sys
 minecraft_proc = None
 
 mc_dir = Path(mc.utils.get_minecraft_directory())
-mods_root = launcher_dir / "mods"
-mods_root.mkdir(exist_ok=True)
 
 ALLOWED_VERSIONS = [
     "1.16.2",
@@ -36,6 +34,9 @@ else:
     launcher_dir = Path(__file__).parent
 
 CONFIG_FILE = launcher_dir / "launcher_config.json"
+
+mods_root = launcher_dir / "mods"
+mods_root.mkdir(exist_ok=True)
 
 # ------------------ MOD PACK HELPERS ------------------
 
