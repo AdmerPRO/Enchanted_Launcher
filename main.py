@@ -9,6 +9,9 @@ import shutil
 import traceback
 import json
 import sys
+import zipfile
+import urllib.request
+import urllib.error
 
 minecraft_proc = None
 
@@ -37,6 +40,21 @@ CONFIG_FILE = launcher_dir / "launcher_config.json"
 
 mods_root = launcher_dir / "mods"
 mods_root.mkdir(exist_ok=True)
+
+# ------------------ FOLDER INIT ------------------
+
+# mods/
+mods_root.mkdir(exist_ok=True)
+
+# mods/temp-mods
+(mods_root / "temp-mods").mkdir(exist_ok=True)
+
+# mods/enchanted-packs (TYLKO TEN FOLDER)
+(mods_root / "enchanted-packs").mkdir(exist_ok=True)
+
+# mods/fabric-<version> dla każdej wersji
+for v in ALLOWED_VERSIONS:
+    (mods_root / f"fabric-{v}").mkdir(exist_ok=True)
 
 # ------------------ MOD PACK HELPERS ------------------
 
@@ -70,6 +88,96 @@ def save_config(data: dict):
         json.dump(data, f, indent=4)
 
 # ------------------ LOGIC ------------------
+
+def install_enchanted_pack(version: str):
+    try:
+        packs_root = mods_root / "enchanted-packs"
+        target_dir = packs_root / f"fabric-{version}"
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        zip_path = packs_root / f"fabric-{version}.zip"
+        repo_url = f"https://github.com/AdmerPRO/Enchanted_Launcher/archive/refs/heads/enchanted-pack-{version}.zip"
+
+        print(f"[DEBUG] Downloading enchanted pack from: {repo_url}")
+        req = urllib.request.Request(repo_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response, open(zip_path, "wb") as out_file:
+            shutil.copyfileobj(response, out_file)
+        print(f"[DEBUG] Download complete: {zip_path}")
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            members = zip_ref.namelist()
+            print(f"[DEBUG] ZIP contains {len(members)} entries")
+            for member in members:
+                prefix = f"Enchanted_Launcher-enchanted-pack-{version}/mods/"
+                if member.startswith(prefix) and member.endswith((".jar", ".mrpack")):
+                    filename = Path(member).name
+                    with zip_ref.open(member) as src, open(target_dir / filename, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                        print(f"[DEBUG] Installed mod: {filename}")
+
+        zip_path.unlink(missing_ok=True)
+        print(f"[DEBUG] Enchanted pack installed for version {version}")
+
+    except urllib.error.HTTPError as e:
+        print(f"[ERROR] Failed to download enchanted pack: {e}")
+        messagebox.showerror("Download Error", f"Failed to download enchanted pack for {version}.\nHTTP Error {e.code}")
+    except Exception as e:
+        print("[ERROR] Exception during enchanted pack installation")
+        traceback.print_exc()
+        messagebox.showerror("Error", f"Failed to install enchanted pack for {version}.\n{e}")
+
+def check_enchanted_mods(version: str) -> bool:
+    packs_root = mods_root / "enchanted-packs"
+    target_dir = packs_root / f"fabric-{version}"
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        zip_path = packs_root / f"fabric-{version}.zip"
+        repo_url = f"https://github.com/AdmerPRO/Enchanted_Launcher/archive/refs/heads/enchanted-pack-{version}.zip"
+
+        print(f"[DEBUG] Checking enchanted pack for version {version} at: {repo_url}")
+        req = urllib.request.Request(repo_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req) as response, open(zip_path, "wb") as out_file:
+            shutil.copyfileobj(response, out_file)
+        print(f"[DEBUG] Downloaded pack for check: {zip_path}")
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            repo_mods = [
+                Path(member).name
+                for member in zip_ref.namelist()
+                if member.startswith(f"Enchanted_Launcher-enchanted-pack-{version}/mods/") and member.endswith((".jar", ".mrpack"))
+            ]
+        print(f"[DEBUG] Mods in repo: {repo_mods}")
+
+        zip_path.unlink(missing_ok=True)
+        missing_mods = [f for f in repo_mods if not (target_dir / f).exists()]
+        print(f"[DEBUG] Missing mods: {missing_mods}")
+
+        if not missing_mods:
+            print(f"[DEBUG] All enchanted mods are installed for {version}")
+            return True
+
+        res = messagebox.askyesno(
+            "Missing Enchanted Mods",
+            f"Some mods from Enchanted Pack {version} are not installed:\n{missing_mods}\n"
+            f"Do you want to download/update them?"
+        )
+        if res:
+            print(f"[DEBUG] User chose to install missing mods for {version}")
+            install_enchanted_pack(version)
+            return True
+        else:
+            print(f"[DEBUG] User canceled enchanted mod update for {version}")
+            return False
+
+    except urllib.error.HTTPError as e:
+        print(f"[ERROR] Failed to download enchanted pack for check: {e}")
+        messagebox.showerror("Download Error", f"Failed to check enchanted pack for {version}.\nHTTP Error {e.code}")
+        return False
+    except Exception as e:
+        print("[ERROR] Exception during checking enchanted mods")
+        traceback.print_exc()
+        return True
 
 def sync_version_to_mods(version):
     global mods_preview_version
@@ -111,6 +219,7 @@ def fabric_id_for(version: str) -> str | None:
 def install_fabric(version):
     try:
         mc.fabric.install_fabric(version, str(mc_dir))
+        install_enchanted_pack(version)
         refresh_versions()
         refresh_mods_versions()
         messagebox.showinfo("Success", f"Fabric {version} installed")
@@ -179,6 +288,10 @@ def launch_game():
         if not version:
             messagebox.showwarning("Version", "Select a version")
             print("[DEBUG] No version selected")
+            return
+        
+        if not check_enchanted_mods(version):
+            print("[DEBUG] User cancelled enchanted mod update")
             return
 
         print("[DEBUG] Preparing mods...")
