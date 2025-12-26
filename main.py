@@ -3,7 +3,7 @@ import subprocess
 import re
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, PhotoImage
 from pathlib import Path
 import shutil
 import traceback
@@ -12,6 +12,7 @@ import sys
 import zipfile
 import urllib.request
 import urllib.error
+import os
 
 minecraft_proc = None
 
@@ -201,20 +202,33 @@ def list_fabric_versions():
             print(f"[{idx}] Version {v} -> Not installed")
     print("================================")
 
-
 list_fabric_versions()
 
 
 def valid_username(name: str) -> bool:
     return 3 <= len(name) <= 12 and re.fullmatch(r"[A-Za-z0-9_]+", name)
 
-
 def fabric_id_for(version: str) -> str | None:
-    for v in mc.utils.get_installed_versions(str(mc_dir)):
-        if v.get("id", "").startswith("fabric-loader") and version in v.get("id", ""):
-            return v["id"]
-    return None
+    fabric_versions = []
 
+    for v in mc.utils.get_installed_versions(str(mc_dir)):
+        vid = v.get("id", "")
+        if vid.startswith("fabric-loader") and vid.endswith(version):
+            # fabric-loader-0.18.4-1.21.8
+            parts = vid.split("-")
+            if len(parts) >= 3:
+                loader_version = parts[2]
+                fabric_versions.append((loader_version, vid))
+
+    if not fabric_versions:
+        return None
+
+    # sortujemy po wersji loadera (semver)
+    fabric_versions.sort(
+        key=lambda x: [int(p) for p in x[0].split(".")]
+    )
+
+    return fabric_versions[-1][1]  # NAJNOWSZY
 
 def install_fabric(version):
     try:
@@ -306,6 +320,26 @@ def launch_game():
 
         version_id = fabric_id_for(version)
 
+        if not version_id:
+            show_progress()
+
+            def install_and_continue():
+                try:
+                    mc.fabric.install_fabric(version, str(mc_dir))
+                    install_enchanted_pack(version)
+                    refresh_versions()
+                    refresh_mods_versions()
+                except Exception as e:
+                    root.after(0, lambda: messagebox.showerror("Install Error", str(e)))
+                    root.after(0, hide_progress)
+                    return
+
+                root.after(0, hide_progress)
+                root.after(0, launch_game)
+
+            threading.Thread(target=install_and_continue, daemon=True).start()
+            return
+        
         print(version_id)
 
         print("[DEBUG] Creating Minecraft launch command...")
@@ -335,7 +369,31 @@ def set_active_version(version):
 
     sync_version_to_mods(version)
 
+def on_username_change(event=None):
+    username = username_entry.get().strip()
+    config = load_config()
+    config["username"] = username
+    save_config(config)
+
 # ------------------ GUI ------------------
+
+def show_progress():
+    progress.pack(pady=5)
+    progress.start(10)
+    play_button.config(state="disabled")
+
+def hide_progress():
+    progress.stop()
+    progress.pack_forget()
+    play_button.config(state="normal")
+
+def lock_ui():
+    play_button.config(state="disabled")
+    progress.start(10)
+
+def unlock_ui():
+    progress.stop()
+    play_button.config(state="normal")
 
 def on_close():
     global minecraft_proc
@@ -376,9 +434,33 @@ def on_close():
 
 root = tk.Tk()
 root.title("Enchanted Launcher")
-root.geometry("640x480")
+
+# --- WINDOW SIZE & CENTER ---
+screen_w = root.winfo_screenwidth()
+screen_h = root.winfo_screenheight()
+
+win_w = screen_w // 3
+win_h = screen_h // 3
+
+pos_x = (screen_w - win_w) // 2
+pos_y = (screen_h - win_h) // 2
+
+root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
 
 root.protocol("WM_DELETE_WINDOW", on_close)
+
+def resource_path(relative_path):
+    if getattr(sys, "frozen", False):
+        base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    else:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+icon_path = resource_path(
+    "icon.ico" if getattr(sys, "frozen", False) else "assets/icon.ico"
+)
+
+root.iconbitmap(icon_path)
 
 notebook = ttk.Notebook(root)
 notebook.pack(fill="both", expand=True)
@@ -388,8 +470,8 @@ launch_tab = ttk.Frame(notebook)
 notebook.add(launch_tab, text="Launch")
 
 ttk.Label(launch_tab, text="Username").pack(pady=(10, 2))
-username_entry = ttk.Entry(launch_tab, width=30)
-username_entry.pack()
+username_entry = ttk.Entry(launch_tab)
+username_entry.pack(fill="x", padx=40)
 
 config = load_config()
 if "username" in config:
@@ -400,7 +482,7 @@ mods_preview_version = last_version
 
 ttk.Label(launch_tab, text="Versions").pack(pady=(10, 2))
 versions_list = tk.Listbox(launch_tab, height=8)
-versions_list.pack(fill="x", padx=20)
+versions_list.pack(fill="both", expand=True, padx=20)
 
 def on_version_select(event):
     sel = versions_list.curselection()
@@ -412,20 +494,14 @@ def on_version_select(event):
 
 versions_list.bind("<<ListboxSelect>>", on_version_select)
 
+play_button = ttk.Button(launch_tab, text="Launch Minecraft", command=launch_game)
+play_button.pack(pady=10)
 
-install_frame = ttk.Frame(launch_tab)
-install_frame.pack(pady=10)
-install_combo = ttk.Combobox(install_frame, values=ALLOWED_VERSIONS, state="readonly")
-install_combo.set(ALLOWED_VERSIONS[0])
-install_combo.pack(side="left", padx=5)
-
-ttk.Button(
-    install_frame,
-    text="Install Fabric",
-    command=lambda: threading.Thread(target=install_fabric, args=(install_combo.get(),), daemon=True).start()
-).pack(side="left", padx=5)
-
-ttk.Button(launch_tab, text="Launch Minecraft", command=launch_game).pack(pady=10)
+progress = ttk.Progressbar(
+    launch_tab,
+    mode="indeterminate",
+    length=250
+)
 
 # ===== TAB: MODS =====
 mods_tab = ttk.Frame(notebook)
