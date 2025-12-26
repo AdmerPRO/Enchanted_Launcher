@@ -90,6 +90,10 @@ def save_config(data: dict):
 
 # ------------------ LOGIC ------------------
 
+def is_minecraft_running():
+    global minecraft_proc
+    return minecraft_proc is not None and minecraft_proc.poll() is None
+
 def install_enchanted_pack(version: str):
     try:
         packs_root = mods_root / "enchanted-packs"
@@ -377,6 +381,20 @@ def on_username_change(event=None):
 
 # ------------------ GUI ------------------
 
+def open_mods_folder():
+    v = mods_version_combo.get()
+    if not v:
+        messagebox.showwarning("Select version", "Please select a version first")
+        return
+    folder = mods_root / f"fabric-{v}"
+    if not folder.exists():
+        messagebox.showinfo("Folder not found", f"Mods folder for version {v} does not exist.")
+        return
+    try:
+        os.startfile(folder)  # Windows
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to open folder:\n{e}")
+
 def show_progress():
     progress.pack(pady=5)
     progress.start(10)
@@ -397,7 +415,7 @@ def unlock_ui():
 
 def on_close():
     global minecraft_proc
-    if minecraft_proc and minecraft_proc.poll() is None:
+    if is_minecraft_running():
         # Use a custom Toplevel for Yes/No style buttons
         warning = tk.Toplevel(root)
         warning.title("Warning")
@@ -420,10 +438,14 @@ def on_close():
 
         def close_launcher():
             warning.destroy()
-            if minecraft_proc and minecraft_proc.poll() is None:
-                minecraft_proc.terminate()  # or kill()
-                minecraft_proc.wait()
-                restore_mods()
+            if is_minecraft_running():
+                try:
+                    minecraft_proc.terminate()
+                    minecraft_proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    minecraft_proc.kill()
+                finally:
+                    restore_mods()
             root.destroy()
 
         tk.Button(btn_frame, text="Cancel", command=cancel).pack(side="left", padx=10)
@@ -604,6 +626,7 @@ ttk.Button(mods_btns, text="Add Mod", command=add_mod).pack(side="left", padx=5)
 ttk.Button(mods_btns, text="Remove Mod", command=remove_mod).pack(side="left", padx=5)
 ttk.Button(mods_btns, text="Enable Mod", command=lambda: toggle_mod(True)).pack(side="left", padx=5)
 ttk.Button(mods_btns, text="Disable Mod", command=lambda: toggle_mod(False)).pack(side="left", padx=5)
+ttk.Button(mods_btns, text="Open Mods Folder", command=open_mods_folder).pack(side="left", padx=5)
 
 def on_mods_version_change(event):
     global mods_preview_version
