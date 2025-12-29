@@ -13,6 +13,12 @@ import zipfile
 import urllib.request
 import urllib.error
 import os
+import webbrowser
+import time
+import gzip
+
+GITHUB_URL = "https://github.com/AdmerPRO/Enchanted_Launcher"
+DISCORD_URL = "https://discord.gg/qTfWSFP2MQ"
 
 minecraft_proc = None
 
@@ -41,6 +47,20 @@ CONFIG_FILE = launcher_dir / "launcher_config.json"
 
 mods_root = launcher_dir / "mods"
 mods_root.mkdir(exist_ok=True)
+
+logs_dir = launcher_dir / "logs"
+logs_dir.mkdir(exist_ok=True)
+
+# ------------------ WEBSITES ------------------
+
+def open_github():
+    webbrowser.open(GITHUB_URL)
+
+def open_discord():
+    webbrowser.open(DISCORD_URL)
+
+def open_account():
+    pass
 
 # ------------------ FOLDER INIT ------------------
 
@@ -89,6 +109,20 @@ def save_config(data: dict):
         json.dump(data, f, indent=4)
 
 # ------------------ LOGIC ------------------
+
+def rotate_logs():
+    latest_log = logs_dir / "latest.txt"
+    if latest_log.exists():
+        mtime = time.strftime("%Y-%m-%d-%H%M%S", time.localtime(latest_log.stat().st_mtime))
+        archive_path = logs_dir / f"{mtime}.log.gz"
+        
+        try:
+            with open(latest_log, 'rb') as f_in:
+                with gzip.open(archive_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            latest_log.unlink()
+        except Exception as e:
+            print(f"[DEBUG] Error in log rotation: {e}")
 
 def is_minecraft_running():
     global minecraft_proc
@@ -265,6 +299,7 @@ def prepare_mods(version: str):
     copy_active_mods(enchanted_dir, mc_mods)
 
 def restore_mods():
+    time.sleep(1)
     mc_mods = mc_dir / "mods"
     temp_mods = mods_root / "temp-mods"
 
@@ -353,9 +388,27 @@ def launch_game():
         def run_game():
             print("[DEBUG] Launching Minecraft...")
             global minecraft_proc
-            minecraft_proc = subprocess.Popen(cmd, cwd=str(mc_dir))
-            minecraft_proc.wait()
+            
+            rotate_logs()
+            latest_log_path = logs_dir / "latest.txt"
+            
+            try:
+                # Otwieramy plik w trybie zapisu
+                with open(latest_log_path, "w", encoding="utf-8") as log_file:
+                    minecraft_proc = subprocess.Popen(
+                        cmd,
+                        cwd=str(mc_dir),
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                        stdout=log_file,
+                        stderr=subprocess.STDOUT
+                    )
+                    
+                    minecraft_proc.wait()
+            except Exception as e:
+                print(f"[ERROR] Launcher log error: {e}")
+            
             print("[DEBUG] Minecraft exited, restoring mods...")
+            time.sleep(2)
             restore_mods()
             print("[DEBUG] Mods restored")
 
@@ -379,7 +432,84 @@ def on_username_change(event=None):
     config["username"] = username
     save_config(config)
 
-# ------------------ GUI ------------------
+# ------------------ REFRESH ------------------
+
+def refresh_versions():
+    versions_list.delete(0, tk.END)
+
+    for v in ALLOWED_VERSIONS:
+        idx = versions_list.size()
+        versions_list.insert(tk.END, v)
+
+        is_installed = fabric_id_for(v) is not None
+
+        if v == HIGHLIGHT_VERSION:
+            if is_installed:
+                versions_list.itemconfig(idx, bg="#FFD700")  # gold
+            else:
+                versions_list.itemconfig(idx, bg="#ADD8E6")  # light blue
+        else:
+            if is_installed:
+                versions_list.itemconfig(idx, bg="#b6fcb6")  # green
+            else:
+                versions_list.itemconfig(idx, bg="#fcb6b6")  # red
+
+    config = load_config()
+    last = config.get("last_version")
+
+    if last in ALLOWED_VERSIONS:
+        idx = ALLOWED_VERSIONS.index(last)
+        versions_list.selection_set(idx)
+        versions_list.activate(idx)
+        versions_list.see(idx)
+        sync_version_to_mods(last) 
+        set_active_version(last)
+
+def refresh_mods_versions():
+    versions = [v for v in ALLOWED_VERSIONS if fabric_id_for(v)]
+    mods_version_combo["values"] = versions
+
+
+def refresh_mods_list():
+    mods_list.delete(0, tk.END)
+    v = mods_preview_version
+    if not v:
+        return
+
+    paths = [
+        mods_root / f"fabric-{v}",
+        mods_root / "enchanted-packs" / f"fabric-{v}"
+    ]
+
+    for path in paths:
+        if not path.exists():
+            continue
+
+        for f in path.iterdir():
+            display = get_mod_display_name(f.name)
+            idx = mods_list.size()
+            mods_list.insert(tk.END, display)
+
+            # Color coding
+            if f.name.startswith("locked_el-"):
+                mods_list.itemconfig(idx, bg="#add8e6")  # light blue = locked
+            elif f.name.endswith(".disabled"):
+                mods_list.itemconfig(idx, bg="#fcb6b6")  # red = disabled
+            else:
+                mods_list.itemconfig(idx, bg="#b6fcb6")  # green = enabled
+
+# ------------------ GUI LOGIC ------------------
+
+def resource_path(relative_path):
+    if getattr(sys, "frozen", False):
+        base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    else:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+icon_path = resource_path(
+    "icon.ico" if getattr(sys, "frozen", False) else "assets/icon.ico"
+)
 
 def open_mods_folder():
     v = mods_version_combo.get()
@@ -453,121 +583,6 @@ def on_close():
     else:
         root.destroy()
 
-
-root = tk.Tk()
-root.title("Enchanted Launcher")
-
-# --- WINDOW SIZE & CENTER ---
-screen_w = root.winfo_screenwidth()
-screen_h = root.winfo_screenheight()
-
-win_w = screen_w // 3
-win_h = screen_h // 3
-
-pos_x = (screen_w - win_w) // 2
-pos_y = (screen_h - win_h) // 2
-
-root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
-
-root.protocol("WM_DELETE_WINDOW", on_close)
-
-def resource_path(relative_path):
-    if getattr(sys, "frozen", False):
-        base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    else:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-icon_path = resource_path(
-    "icon.ico" if getattr(sys, "frozen", False) else "assets/icon.ico"
-)
-
-root.iconbitmap(icon_path)
-
-notebook = ttk.Notebook(root)
-notebook.pack(fill="both", expand=True)
-
-# ===== TAB: LAUNCH =====
-launch_tab = ttk.Frame(notebook)
-notebook.add(launch_tab, text="Launch")
-
-ttk.Label(launch_tab, text="Username").pack(pady=(10, 2))
-username_entry = ttk.Entry(launch_tab)
-username_entry.pack(fill="x", padx=40)
-
-config = load_config()
-if "username" in config:
-    username_entry.insert(0, config["username"])
-
-last_version = config.get("last_version")
-mods_preview_version = last_version
-
-ttk.Label(launch_tab, text="Versions").pack(pady=(10, 2))
-versions_list = tk.Listbox(launch_tab, height=8)
-versions_list.pack(fill="both", expand=True, padx=20)
-
-def on_version_select(event):
-    sel = versions_list.curselection()
-    if not sel:
-        return
-
-    version = versions_list.get(sel[0])
-    set_active_version(version)
-
-versions_list.bind("<<ListboxSelect>>", on_version_select)
-
-play_button = ttk.Button(launch_tab, text="Launch Minecraft", command=launch_game)
-play_button.pack(pady=10)
-
-progress = ttk.Progressbar(
-    launch_tab,
-    mode="indeterminate",
-    length=250
-)
-
-# ===== TAB: MODS =====
-mods_tab = ttk.Frame(notebook)
-notebook.add(mods_tab, text="Mods")
-
-mods_version_combo = ttk.Combobox(mods_tab, state="readonly")
-mods_version_combo.pack(pady=10)
-mods_list = tk.Listbox(mods_tab)
-mods_list.pack(fill="both", expand=True, padx=20, pady=5)
-
-
-def refresh_mods_versions():
-    versions = [v for v in ALLOWED_VERSIONS if fabric_id_for(v)]
-    mods_version_combo["values"] = versions
-
-
-def refresh_mods_list():
-    mods_list.delete(0, tk.END)
-    v = mods_preview_version
-    if not v:
-        return
-
-    paths = [
-        mods_root / f"fabric-{v}",
-        mods_root / "enchanted-packs" / f"fabric-{v}"
-    ]
-
-    for path in paths:
-        if not path.exists():
-            continue
-
-        for f in path.iterdir():
-            display = get_mod_display_name(f.name)
-            idx = mods_list.size()
-            mods_list.insert(tk.END, display)
-
-            # Color coding
-            if f.name.startswith("locked_el-"):
-                mods_list.itemconfig(idx, bg="#add8e6")  # light blue = locked
-            elif f.name.endswith(".disabled"):
-                mods_list.itemconfig(idx, bg="#fcb6b6")  # red = disabled
-            else:
-                mods_list.itemconfig(idx, bg="#b6fcb6")  # green = enabled
-
 def toggle_mod(enable: bool):
     sel = mods_list.curselection()
     if not sel:
@@ -619,56 +634,125 @@ def remove_mod():
     f.unlink(missing_ok=True)
     refresh_mods_list()
 
-mods_btns = ttk.Frame(mods_tab)
-mods_btns.pack(pady=5)
+# ------------------ GUI ------------------
 
-ttk.Button(mods_btns, text="Add Mod", command=add_mod).pack(side="left", padx=5)
-ttk.Button(mods_btns, text="Remove Mod", command=remove_mod).pack(side="left", padx=5)
-ttk.Button(mods_btns, text="Enable Mod", command=lambda: toggle_mod(True)).pack(side="left", padx=5)
-ttk.Button(mods_btns, text="Disable Mod", command=lambda: toggle_mod(False)).pack(side="left", padx=5)
-ttk.Button(mods_btns, text="Open Mods Folder", command=open_mods_folder).pack(side="left", padx=5)
+root = tk.Tk()
+root.title("Enchanted Launcher")
+
+# --- WINDOW SIZE & CENTER ---
+screen_w = root.winfo_screenwidth()
+screen_h = root.winfo_screenheight()
+
+win_w = screen_w // 2.6
+win_h = screen_h // 2.6
+
+pos_x = (screen_w - win_w) // 2
+pos_y = (screen_h - win_h) // 2
+
+root.geometry(f"{int(win_w)}x{int(win_h)}+{int(pos_x)}+{int(pos_y)}")
+root.minsize(720, 480)
+
+root.protocol("WM_DELETE_WINDOW", on_close)
+
+root.iconbitmap(icon_path)
+
+# ===== TOP BAR =====
+top_bar = ttk.Frame(root)
+top_bar.pack(fill="x", padx=10, pady=(8, 4))
+
+ttk.Label(
+    top_bar,
+    text="Enchanted Launcher",
+    font=("Segoe UI", 14, "bold")
+).pack(side="left")
+
+top_btns = ttk.Frame(top_bar)
+top_btns.pack(side="right")
+
+ttk.Button(top_btns, text="Account", command=open_account).pack(side="left", padx=4)
+ttk.Button(top_btns, text="GitHub", command=open_github).pack(side="left", padx=4)
+ttk.Button(top_btns, text="Discord", command=open_discord).pack(side="left", padx=4)
+
+# ===== NOTEBOOK =====
+notebook = ttk.Notebook(root)
+notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+# ================= TAB: LAUNCH =================
+launch_tab = ttk.Frame(notebook)
+notebook.add(launch_tab, text="Launch")
+
+launch_container = ttk.Frame(launch_tab)
+launch_container.pack(fill="both", expand=True, padx=30, pady=20)
+
+ttk.Label(launch_container, text="Username").pack(anchor="w")
+username_entry = ttk.Entry(launch_container)
+username_entry.pack(fill="x", pady=(2, 10))
+
+config = load_config()
+if "username" in config:
+    username_entry.insert(0, config["username"])
+
+last_version = config.get("last_version")
+mods_preview_version = last_version
+
+ttk.Label(launch_container, text="Versions").pack(anchor="w")
+versions_list = tk.Listbox(launch_container, height=8)
+versions_list.pack(fill="both", expand=True, pady=(2, 10))
+
+def on_version_select(event):
+    sel = versions_list.curselection()
+    if not sel:
+        return
+    version = versions_list.get(sel[0])
+    set_active_version(version)
+
+versions_list.bind("<<ListboxSelect>>", on_version_select)
+
+play_button = ttk.Button(
+    launch_container,
+    text="▶ Launch Minecraft",
+    command=launch_game
+)
+play_button.pack(pady=(10, 6))
+
+progress = ttk.Progressbar(
+    launch_container,
+    mode="indeterminate",
+    length=300
+)
+
+# ================= TAB: MODS =================
+mods_tab = ttk.Frame(notebook)
+notebook.add(mods_tab, text="Mods")
+
+mods_container = ttk.Frame(mods_tab)
+mods_container.pack(fill="both", expand=True, padx=20, pady=15)
+
+top_mods = ttk.Frame(mods_container)
+top_mods.pack(fill="x")
+
+ttk.Label(top_mods, text="Minecraft Version").pack(side="left")
+mods_version_combo = ttk.Combobox(top_mods, state="readonly", width=20)
+mods_version_combo.pack(side="left", padx=8)
+
+mods_list = tk.Listbox(mods_container)
+mods_list.pack(fill="both", expand=True, pady=10)
+
+mods_btns = ttk.Frame(mods_container)
+mods_btns.pack(fill="x")
+
+ttk.Button(mods_btns, text="Add Mod", command=add_mod).pack(side="left", padx=4)
+ttk.Button(mods_btns, text="Remove", command=remove_mod).pack(side="left", padx=4)
+ttk.Button(mods_btns, text="Enable", command=lambda: toggle_mod(True)).pack(side="left", padx=4)
+ttk.Button(mods_btns, text="Disable", command=lambda: toggle_mod(False)).pack(side="left", padx=4)
+ttk.Button(mods_btns, text="Open Mods Folder", command=open_mods_folder).pack(side="right", padx=4)
 
 def on_mods_version_change(event):
     global mods_preview_version
-    v = mods_version_combo.get()
-    mods_preview_version = v
+    mods_preview_version = mods_version_combo.get()
     refresh_mods_list()
 
 mods_version_combo.bind("<<ComboboxSelected>>", on_mods_version_change)
-
-
-# ------------------ REFRESH ------------------
-
-def refresh_versions():
-    versions_list.delete(0, tk.END)
-
-    for v in ALLOWED_VERSIONS:
-        idx = versions_list.size()
-        versions_list.insert(tk.END, v)
-
-        is_installed = fabric_id_for(v) is not None
-
-        if v == HIGHLIGHT_VERSION:
-            if is_installed:
-                versions_list.itemconfig(idx, bg="#FFD700")  # gold
-            else:
-                versions_list.itemconfig(idx, bg="#ADD8E6")  # light blue
-        else:
-            if is_installed:
-                versions_list.itemconfig(idx, bg="#b6fcb6")  # green
-            else:
-                versions_list.itemconfig(idx, bg="#fcb6b6")  # red
-
-    config = load_config()
-    last = config.get("last_version")
-
-    if last in ALLOWED_VERSIONS:
-        idx = ALLOWED_VERSIONS.index(last)
-        versions_list.selection_set(idx)
-        versions_list.activate(idx)
-        versions_list.see(idx)
-        sync_version_to_mods(last) 
-        set_active_version(last)
 
 refresh_versions()
 refresh_mods_versions()
