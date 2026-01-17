@@ -16,6 +16,7 @@ import os
 import webbrowser
 import time
 import gzip
+import customtkinter as ctk
 
 GITHUB_URL = "https://github.com/AdmerPRO/Enchanted_Launcher"
 DISCORD_URL = "https://discord.gg/qTfWSFP2MQ"
@@ -23,6 +24,8 @@ DISCORD_URL = "https://discord.gg/qTfWSFP2MQ"
 minecraft_proc = None
 
 mc_dir = Path(mc.utils.get_minecraft_directory())
+
+selected_mod = {"value": None}
 
 ALLOWED_VERSIONS = [
     "1.16.2",
@@ -220,7 +223,7 @@ def check_enchanted_mods(version: str) -> bool:
 
 def sync_version_to_mods(version):
     global mods_preview_version
-    if version in mods_version_combo["values"]:
+    if version in mods_versions_values:
         mods_version_combo.set(version)
         mods_preview_version = version
         refresh_mods_list()
@@ -303,12 +306,10 @@ def restore_mods():
     mc_mods = mc_dir / "mods"
     temp_mods = mods_root / "temp-mods"
 
-    # remove temporary mods
     for ext in ("tmp_el_*.jar", "tmp_el_*.mrpack"):
         for f in mc_mods.glob(ext):
             f.unlink(missing_ok=True)
 
-    # restore original mods
     for ext in ("*.jar", "*.mrpack"):
         for f in temp_mods.glob(ext):
             shutil.move(f, mc_mods / f.name)
@@ -432,72 +433,6 @@ def on_username_change(event=None):
     config["username"] = username
     save_config(config)
 
-# ------------------ REFRESH ------------------
-
-def refresh_versions():
-    versions_list.delete(0, tk.END)
-
-    for v in ALLOWED_VERSIONS:
-        idx = versions_list.size()
-        versions_list.insert(tk.END, v)
-
-        is_installed = fabric_id_for(v) is not None
-
-        if v == HIGHLIGHT_VERSION:
-            if is_installed:
-                versions_list.itemconfig(idx, bg="#FFD700")  # gold
-            else:
-                versions_list.itemconfig(idx, bg="#ADD8E6")  # light blue
-        else:
-            if is_installed:
-                versions_list.itemconfig(idx, bg="#b6fcb6")  # green
-            else:
-                versions_list.itemconfig(idx, bg="#fcb6b6")  # red
-
-    config = load_config()
-    last = config.get("last_version")
-
-    if last in ALLOWED_VERSIONS:
-        idx = ALLOWED_VERSIONS.index(last)
-        versions_list.selection_set(idx)
-        versions_list.activate(idx)
-        versions_list.see(idx)
-        sync_version_to_mods(last) 
-        set_active_version(last)
-
-def refresh_mods_versions():
-    versions = [v for v in ALLOWED_VERSIONS if fabric_id_for(v)]
-    mods_version_combo["values"] = versions
-
-
-def refresh_mods_list():
-    mods_list.delete(0, tk.END)
-    v = mods_preview_version
-    if not v:
-        return
-
-    paths = [
-        mods_root / f"fabric-{v}",
-        mods_root / "enchanted-packs" / f"fabric-{v}"
-    ]
-
-    for path in paths:
-        if not path.exists():
-            continue
-
-        for f in path.iterdir():
-            display = get_mod_display_name(f.name)
-            idx = mods_list.size()
-            mods_list.insert(tk.END, display)
-
-            # Color coding
-            if f.name.startswith("locked_el-"):
-                mods_list.itemconfig(idx, bg="#add8e6")  # light blue = locked
-            elif f.name.endswith(".disabled"):
-                mods_list.itemconfig(idx, bg="#fcb6b6")  # red = disabled
-            else:
-                mods_list.itemconfig(idx, bg="#b6fcb6")  # green = enabled
-
 # ------------------ GUI LOGIC ------------------
 
 def resource_path(relative_path):
@@ -524,16 +459,6 @@ def open_mods_folder():
         os.startfile(folder)  # Windows
     except Exception as e:
         messagebox.showerror("Error", f"Failed to open folder:\n{e}")
-
-def show_progress():
-    progress.pack(pady=5)
-    progress.start(10)
-    play_button.config(state="disabled")
-
-def hide_progress():
-    progress.stop()
-    progress.pack_forget()
-    play_button.config(state="normal")
 
 def lock_ui():
     play_button.config(state="disabled")
@@ -584,12 +509,15 @@ def on_close():
         root.destroy()
 
 def toggle_mod(enable: bool):
-    sel = mods_list.curselection()
-    if not sel:
+    mod_name = selected_mod.get("name")
+    if not mod_name:
+        messagebox.showwarning("Select mod", "Please select a mod first")
         return
 
     v = mods_version_combo.get()
-    name = mods_list.get(sel)
+    if not v:
+        messagebox.showwarning("Select version", "Please select a version first")
+        return
 
     paths = [
         mods_root / f"fabric-{v}",
@@ -601,19 +529,22 @@ def toggle_mod(enable: bool):
             continue
 
         for f in path.iterdir():
-            if get_mod_display_name(f.name) == name:
+            if get_mod_display_name(f.name) == mod_name:
 
                 if f.name.startswith("locked_el-"):
                     messagebox.showwarning("Locked mod", "This mod cannot be disabled")
                     return
 
+                # Enable: usuń ".disabled" z końca
                 if enable and f.name.endswith(".disabled"):
-                    f.rename(f.with_suffix(""))
+                    f.rename(f.with_name(f.name.replace(".disabled", "")))
+                # Disable: dodaj ".disabled" jeśli nie ma
                 elif not enable and not f.name.endswith(".disabled"):
                     f.rename(f.with_name(f.name + ".disabled"))
 
                 refresh_mods_list()
                 return
+
 
 def add_mod():
     v = mods_version_combo.get()
@@ -624,68 +555,89 @@ def add_mod():
         shutil.copy(path, mods_root / f"fabric-{v}" / Path(path).name)
         refresh_mods_list()
 
-
-def remove_mod():
-    sel = mods_list.curselection()
-    if not sel:
-        return
-    v = mods_version_combo.get()
-    f = mods_root / f"fabric-{v}" / mods_list.get(sel)
-    f.unlink(missing_ok=True)
-    refresh_mods_list()
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
 
 # ------------------ GUI ------------------
 
-root = tk.Tk()
+selected_version_btn = {"btn": None}  # aktualnie wybrany przycisk wersji
+selected_version = {"value": None}    # aktualnie wybrana wersja
+version_button_colors = {}            # słownik do przechowywania oryginalnych kolorów przycisków wersji
+
+class FakeListbox:
+    def curselection(self):
+        return (0,) if selected_version["value"] else ()
+
+    def get(self, index):
+        return selected_version["value"]
+
+versions_list = FakeListbox()
+
+selected_mod = {"value": None}
+
+root = ctk.CTk()
 root.title("Enchanted Launcher")
 
 # --- WINDOW SIZE & CENTER ---
 screen_w = root.winfo_screenwidth()
 screen_h = root.winfo_screenheight()
 
-win_w = screen_w // 2.6
-win_h = screen_h // 2.6
+win_w = int(screen_w // 2.6)
+win_h = int(screen_h // 2.6)
 
 pos_x = (screen_w - win_w) // 2
 pos_y = (screen_h - win_h) // 2
 
-root.geometry(f"{int(win_w)}x{int(win_h)}+{int(pos_x)}+{int(pos_y)}")
+root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
 root.minsize(720, 480)
 
 root.protocol("WM_DELETE_WINDOW", on_close)
-
 root.iconbitmap(icon_path)
 
 # ===== TOP BAR =====
-top_bar = ttk.Frame(root)
-top_bar.pack(fill="x", padx=10, pady=(8, 4))
+top_bar = ctk.CTkFrame(root, height=50)
+top_bar.pack(fill="x", padx=10, pady=(10, 5))
 
-ttk.Label(
+ctk.CTkLabel(
     top_bar,
     text="Enchanted Launcher",
-    font=("Segoe UI", 14, "bold")
-).pack(side="left")
+    font=ctk.CTkFont(size=18, weight="bold")
+).pack(side="left", padx=10)
 
-top_btns = ttk.Frame(top_bar)
-top_btns.pack(side="right")
+top_btns = ctk.CTkFrame(top_bar, fg_color="transparent")
+top_btns.pack(side="right", padx=10)
 
-ttk.Button(top_btns, text="Account", command=open_account).pack(side="left", padx=4)
-ttk.Button(top_btns, text="GitHub", command=open_github).pack(side="left", padx=4)
-ttk.Button(top_btns, text="Discord", command=open_discord).pack(side="left", padx=4)
+ctk.CTkButton(top_btns, text="Account", width=90, command=open_account).pack(side="left", padx=4)
+ctk.CTkButton(top_btns, text="GitHub", width=90, command=open_github).pack(side="left", padx=4)
+ctk.CTkButton(top_btns, text="Discord", width=90, command=open_discord).pack(side="left", padx=4)
 
-# ===== NOTEBOOK =====
-notebook = ttk.Notebook(root)
-notebook.pack(fill="both", expand=True, padx=10, pady=10)
+# ===== TABS =====
+tabs = ctk.CTkTabview(root)
+tabs.pack(fill="both", expand=True, padx=10, pady=10)
+
+launch_tab = tabs.add("Launch")
+mods_tab = tabs.add("Mods")
 
 # ================= TAB: LAUNCH =================
-launch_tab = ttk.Frame(notebook)
-notebook.add(launch_tab, text="Launch")
 
-launch_container = ttk.Frame(launch_tab)
+def lighten_color(hex_color, amount=0.2):
+    """Rozjaśnia kolor hex o podany procent (amount od 0 do 1)"""
+    hex_color = hex_color.lstrip("#")
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+
+    r = min(int(r + (255 - r) * amount), 255)
+    g = min(int(g + (255 - g) * amount), 255)
+    b = min(int(b + (255 - b) * amount), 255)
+
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+launch_container = ctk.CTkFrame(launch_tab)
 launch_container.pack(fill="both", expand=True, padx=30, pady=20)
 
-ttk.Label(launch_container, text="Username").pack(anchor="w")
-username_entry = ttk.Entry(launch_container)
+ctk.CTkLabel(launch_container, text="Username").pack(anchor="w")
+username_entry = ctk.CTkEntry(launch_container)
 username_entry.pack(fill="x", pady=(2, 10))
 
 config = load_config()
@@ -695,66 +647,196 @@ if "username" in config:
 last_version = config.get("last_version")
 mods_preview_version = last_version
 
-ttk.Label(launch_container, text="Versions").pack(anchor="w")
-versions_list = tk.Listbox(launch_container, height=8)
-versions_list.pack(fill="both", expand=True, pady=(2, 10))
+mods_versions_values = []
 
-def on_version_select(event):
-    sel = versions_list.curselection()
-    if not sel:
-        return
-    version = versions_list.get(sel[0])
+ctk.CTkLabel(launch_container, text="Versions").pack(anchor="w")
+
+versions_frame = ctk.CTkScrollableFrame(launch_container, height=220)
+versions_frame.pack(fill="both", expand=True, pady=(5, 10))
+
+selected_version_btn = {"btn": None}
+
+class FakeModsList:
+    def curselection(self):
+        return (0,) if selected_mod.get("value") else ()
+
+    def get(self, index):
+        # zwraca nazwę wybranego moda
+        return selected_mod.get("value")
+    
+mods_list = FakeModsList()
+
+def on_mod_select(display_name):
+    selected_mod["value"] = display_name
+
+def on_version_click(version, btn):
+    global version_button_colors, selected_version_btn, selected_version
+
+    # przywracamy kolor poprzedniego wybranego przycisku
+    if selected_version_btn["btn"]:
+        prev_btn = selected_version_btn["btn"]
+        try:
+            prev_color = version_button_colors.get(prev_btn, "#2d7d46")
+            prev_btn.configure(fg_color=prev_color)
+        except tk.TclError:
+            pass  # przycisk został zniszczony
+
+    # podświetlamy nowy przycisk
+    original_color = version_button_colors.get(btn, "#2d7d46")
+    btn.configure(fg_color=lighten_color(original_color, 0.3))
+    
+    selected_version_btn["btn"] = btn
+    selected_version["value"] = version
+
     set_active_version(version)
 
-versions_list.bind("<<ListboxSelect>>", on_version_select)
+version_buttons = {}
 
-play_button = ttk.Button(
+def refresh_versions():
+    # czyścimy poprzednie przyciski
+    for w in versions_frame.winfo_children():
+        w.destroy()
+
+    for v in ALLOWED_VERSIONS:
+        # sprawdzamy, czy wersja fabric jest zainstalowana
+        installed = fabric_id_for(v) is not None
+        color = "#2d7d46" if installed else "#7d2d2d"  # domyślny kolor
+        if v == HIGHLIGHT_VERSION:
+            color = "#b58b00" if installed else "#005f8a"
+
+        # tworzymy przycisk wersji
+        btn = ctk.CTkButton(
+            versions_frame,
+            text=v,
+            fg_color=color
+        )
+        btn.pack(fill="x", pady=2)
+
+        # zapisujemy oryginalny kolor przycisku w słowniku
+        version_button_colors[btn] = color
+
+        # przypisujemy funkcję kliknięcia, która podświetla wybraną wersję
+        btn.configure(command=lambda b=btn, vv=v: on_version_click(vv, b))
+
+        # jeśli to ostatnio wybrana wersja, automatycznie ją zaznaczamy
+        if v == last_version:
+            on_version_click(v, btn)
+
+
+refresh_versions()
+
+play_button = ctk.CTkButton(
     launch_container,
     text="▶ Launch Minecraft",
+    height=40,
     command=launch_game
 )
 play_button.pack(pady=(10, 6))
 
-progress = ttk.Progressbar(
-    launch_container,
-    mode="indeterminate",
-    length=300
-)
+progress = ctk.CTkProgressBar(launch_container)
+progress.set(0)
+
+def show_progress():
+    progress.pack(fill="x", pady=5)
+    progress.start()
+    play_button.configure(state="disabled")
+
+def hide_progress():
+    progress.stop()
+    progress.pack_forget()
+    play_button.configure(state="normal")
 
 # ================= TAB: MODS =================
-mods_tab = ttk.Frame(notebook)
-notebook.add(mods_tab, text="Mods")
-
-mods_container = ttk.Frame(mods_tab)
+mods_container = ctk.CTkFrame(mods_tab)
 mods_container.pack(fill="both", expand=True, padx=20, pady=15)
 
-top_mods = ttk.Frame(mods_container)
+top_mods = ctk.CTkFrame(mods_container, fg_color="transparent")
 top_mods.pack(fill="x")
 
-ttk.Label(top_mods, text="Minecraft Version").pack(side="left")
-mods_version_combo = ttk.Combobox(top_mods, state="readonly", width=20)
+ctk.CTkLabel(top_mods, text="Minecraft Version").pack(side="left")
+
+mods_version_combo = ctk.CTkComboBox(top_mods, width=200, state="readonly")
 mods_version_combo.pack(side="left", padx=8)
 
-mods_list = tk.Listbox(mods_container)
-mods_list.pack(fill="both", expand=True, pady=10)
+mods_list_frame = ctk.CTkScrollableFrame(mods_container)
+mods_list_frame.pack(fill="both", expand=True, pady=10)
 
-mods_btns = ttk.Frame(mods_container)
-mods_btns.pack(fill="x")
+selected_mod = {"name": None}
 
-ttk.Button(mods_btns, text="Add Mod", command=add_mod).pack(side="left", padx=4)
-ttk.Button(mods_btns, text="Remove", command=remove_mod).pack(side="left", padx=4)
-ttk.Button(mods_btns, text="Enable", command=lambda: toggle_mod(True)).pack(side="left", padx=4)
-ttk.Button(mods_btns, text="Disable", command=lambda: toggle_mod(False)).pack(side="left", padx=4)
-ttk.Button(mods_btns, text="Open Mods Folder", command=open_mods_folder).pack(side="right", padx=4)
+selected_mod_btn = {"btn": None}  # globalnie, do śledzenia wybranego moda
 
-def on_mods_version_change(event):
+def refresh_mods_list():
+    for w in mods_list_frame.winfo_children():
+        w.destroy()
+
+    v = mods_preview_version
+    if not v:
+        return
+
+    paths = [
+        mods_root / f"fabric-{v}",
+        mods_root / "enchanted-packs" / f"fabric-{v}"
+    ]
+
+    for path in paths:
+        if not path.exists():
+            continue
+
+        for f in path.iterdir():
+            display = get_mod_display_name(f.name)
+
+            color = "#2d7d46"  # domyślny
+            if f.name.startswith("locked_el-"):
+                color = "#1f6aa5"
+            elif f.name.endswith(".disabled"):
+                color = "#7d2d2d"
+
+            btn = ctk.CTkButton(
+                mods_list_frame,
+                text=display,
+                fg_color=color
+            )
+            btn.pack(fill="x", pady=2)
+
+            # lambda przekazuje referencję do przycisku
+            btn.configure(command=lambda b=btn, n=display, c=color: on_mod_click(b, n, c))
+
+def on_mod_click(btn, mod_name, original_color):
+    # przywracamy kolor poprzedniego wybranego tylko jeśli istnieje
+    if selected_mod_btn["btn"]:
+        prev_btn = selected_mod_btn["btn"]
+        try:
+            prev_btn.configure(fg_color=prev_btn.original_color)
+        except tk.TclError:
+            # przycisk został zniszczony, nic nie robimy
+            pass
+
+    # ustawiamy nowy jako wybrany i podświetlamy
+    btn.configure(fg_color=lighten_color(original_color, 0.3))
+    btn.original_color = original_color  # zapisujemy, żeby móc przywrócić
+    selected_mod_btn["btn"] = btn
+    selected_mod["name"] = mod_name
+
+def refresh_mods_versions():
+    global mods_versions_values
+    mods_versions_values = [v for v in ALLOWED_VERSIONS if fabric_id_for(v)]
+    mods_version_combo.configure(values=mods_versions_values)
+
+def on_mods_version_change(event=None):
     global mods_preview_version
     mods_preview_version = mods_version_combo.get()
     refresh_mods_list()
 
 mods_version_combo.bind("<<ComboboxSelected>>", on_mods_version_change)
 
-refresh_versions()
+mods_btns = ctk.CTkFrame(mods_container, fg_color="transparent")
+mods_btns.pack(fill="x")
+
+ctk.CTkButton(mods_btns, text="Add Mod", command=add_mod).pack(side="left", padx=4)
+ctk.CTkButton(mods_btns, text="Enable", command=lambda: toggle_mod(True)).pack(side="left", padx=4)
+ctk.CTkButton(mods_btns, text="Disable", command=lambda: toggle_mod(False)).pack(side="left", padx=4)
+ctk.CTkButton(mods_btns, text="Open Mods Folder", command=open_mods_folder).pack(side="right", padx=4)
+
 refresh_mods_versions()
 
 root.mainloop()
