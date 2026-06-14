@@ -1,90 +1,62 @@
 # Enchanted Launcher
 
-**Enchanted Launcher** is a modern Minecraft launcher designed for players using Fabric versions. The project is currently in **early development**, but it already offers unique features that set it apart from the official launcher.
-
----
+Enchanted Launcher is a lightweight Minecraft Fabric launcher with per-version mod folders and offline username support.
 
 ## Features
 
-- **Fabric Version Support**  
-  The launcher supports multiple Minecraft Fabric versions, and **we are actively adding support for new versions**:
+- CustomTkinter desktop UI.
+- Fabric launch support with automatic Fabric install on first launch.
+- Version-specific mod folders under `mods/fabric-<version>`.
+- Enable, disable, and add `.jar` or `.mrpack` files per version.
+- Local log rotation in `logs/`.
+- No setup wizard and no automatic optimization pack downloads.
+- PyInstaller export script for building a standalone EXE with the project icon.
 
-  | Version | Fabric |
-  |---------|--------|
-  | 1.16.2  | ✅     |
-  | 1.17.1  | ✅     |
-  | 1.18.2  | ✅     |
-  | 1.21.2  | ✅     |
-  | 1.21.8  | ✅     |
-  | 1.21.10 | ✅     |
+## Supported Versions
 
-- **Version-Specific Mods**  
-  Unlike the official launcher, Enchanted Launcher allows mods to be assigned to specific versions. This means you can run version `1.21.8` with different mods than `1.21.4`, enabling **fast and easy version switching**.
+| Version | Fabric |
+| --- | --- |
+| 1.16.2 | supported |
+| 1.17.1 | supported |
+| 1.18.2 | supported |
+| 1.20.2 | supported |
+| 1.21.2 | supported |
+| 1.21.8 | supported |
+| 1.21.10 | supported |
+| 1.21.11 | supported |
+| 26.1.2 | supported |
 
-- **Preloaded Mod Packs**  
-  The launcher comes with ready-to-use mod packs for **PvP** and **optimization**, so you can get started without manually installing mods.
+Fabric installation still depends on the version being available through `minecraft-launcher-lib` and Fabric's public metadata.
 
-- **Mods Tab**  
-  A dedicated "Mods" tab lets you browse all supported versions and add your own mods for each specific version.
+## Run From Source
 
-- **Non-Premium Player Support**  
-  No Minecraft account required – just enter your nickname and start playing.
+```powershell
+python -m pip install -r requirements.txt
+python main.py
+```
 
----
+## Build EXE
 
-## Project Status
+```powershell
+python export_to_exe.py
+```
 
-> ⚠️ Enchanted Launcher is in **early development**. Features may be limited and bugs possible.  
-> We are actively working on adding support for new versions and improving functionality.
+The executable is created in `dist/EnchantedLauncher.exe`. You can override the output name:
 
----
+```powershell
+python export_to_exe.py --name EnchantedLauncherDev
+```
 
-## How to Use
+## Runtime Files
 
-1. Download and run the launcher.
-2. Enter your nickname.
-3. In the "Mods" tab, you can:
-   - Browse existing mods for that version.
-   - Add your own mods for specific versions.
-4. Select the Minecraft version you want to play.
-5. Enter your nickname and click "Play" to start the game.
+The launcher creates these local files and folders next to the app:
 
----
+- `launcher_config.json`
+- `logs/`
+- `mods/`
 
-## Support
-
-The project is actively developed. If you encounter issues, please report them in the GitHub repository or contact the author.
-
----
-
-## Starter mod pack
-
-We are currently using the following mods:
-- AppleSkin
-- Armor Hud Numbers
-- Better Hurt Cam
-- Collective
-- Fabulously Optimized (mod pack)
-- Gui Effect Timer
-- Hero's Anchor Optimizer
-- In-Game Account Switcher
-- Fabric API
-- Sodium
-- Marlow's Crystal Optimizer
-- ModMenu
-- Shield Fixes
-- Shield Status
-- TotemCounter
-- Ukulib
-- Uku's Armor Hud
-- ViaFabricPlus
-- WalksyLib
-
-**Not every Minecraft version has all the listed mods**
-
----
+These are intentionally ignored by Git.
 
 ## License
 
-This project is licensed under the **MIT License**.  
-See the `LICENSE` file in the repository.
+This project is licensed under the MIT License. See `LICENSE.md`.

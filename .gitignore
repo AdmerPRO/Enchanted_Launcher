@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+
+# Build outputs
+build/
+dist/
+*.spec
+
+# Runtime data
+launcher_config.json
+logs/
+mods/
+
+# Local tooling
+.idea/
+.vscode/
+.pytest_cache/
+.mypy_cache/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
