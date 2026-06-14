@@ -41,14 +41,25 @@ def install_fabric(minecraft_dir: Path, minecraft_version: str) -> None:
     mc.fabric.install_fabric(minecraft_version, str(minecraft_dir))
 
 
-def build_launch_command(minecraft_dir: Path, version_id: str, username: str) -> list[str]:
+def build_launch_command(
+    minecraft_dir: Path,
+    version_id: str,
+    username: str,
+    server_host: str = "",
+    server_port: str = "",
+) -> list[str]:
     player_uuid = uuid.uuid3(uuid.NAMESPACE_DNS, f"OfflinePlayer:{username}")
     settings = {
         "username": username,
         "uuid": str(player_uuid),
         "token": "offline",
     }
-    return mc.command.get_minecraft_command(version_id, str(minecraft_dir), settings)
+    command = mc.command.get_minecraft_command(version_id, str(minecraft_dir), settings)
+    if server_host.strip():
+        command.extend(["--server", server_host.strip()])
+        if server_port.strip():
+            command.extend(["--port", server_port.strip()])
+    return command
 
 
 def start_process(command: list[str], cwd: Path, log_file, hide_console: bool = True) -> subprocess.Popen:

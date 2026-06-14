@@ -1,13 +1,18 @@
 # Enchanted Launcher
 
-Enchanted Launcher is a lightweight Minecraft Fabric launcher with per-version mod folders and offline username support.
+Enchanted Launcher is a lightweight Minecraft Fabric launcher with profiles, inherited default mods, quickplay slots, and offline username support.
 
 ## Features
 
 - CustomTkinter desktop UI.
+- Rotatable Steve skin preview controlled with right mouse drag.
 - Fabric launch support with automatic Fabric install on first launch.
-- Version-specific mod folders under `mods/fabric-<version>`.
-- Enable, disable, and add `.jar` or `.mrpack` files per version.
+- Portable Minecraft data folder in `.minecraft/` next to the launcher.
+- Profile system with a shared `Default` profile.
+- Profiles are mod packs only; they do not auto-join servers.
+- Mods from `Default` are inherited by every other profile and shown as grey inherited entries.
+- Custom mods from local files or Fabric mods from Modrinth.
+- Up to four saved quickplay entries for profile + server launches.
 - Local log rotation in `logs/`.
 - No setup wizard and no automatic optimization pack downloads.
 - PyInstaller export script for building a standalone EXE with the project icon.
@@ -52,6 +57,9 @@ python export_to_exe.py --name EnchantedLauncherDev
 The launcher creates these local files and folders next to the app:
 
 - `launcher_config.json`
+- `.minecraft/`
+- `profiles/`
+- `cache/`
 - `logs/`
 - `mods/`
 

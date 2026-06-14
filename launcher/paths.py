@@ -4,8 +4,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import minecraft_launcher_lib as mc
-
 
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
@@ -27,10 +25,14 @@ class LauncherPaths:
     root: Path
     minecraft: Path
     config: Path
+    profiles: Path
     mods: Path
     temp_mods: Path
     logs: Path
+    cache: Path
+    modrinth_icons: Path
     icon: Path
+    steve_skin: Path
 
     @classmethod
     def create(cls) -> "LauncherPaths":
@@ -38,17 +40,23 @@ class LauncherPaths:
         mods = root / "mods"
         return cls(
             root=root,
-            minecraft=Path(mc.utils.get_minecraft_directory()),
+            minecraft=root / ".minecraft",
             config=root / "launcher_config.json",
+            profiles=root / "profiles",
             mods=mods,
             temp_mods=mods / "temp-mods",
             logs=root / "logs",
+            cache=root / "cache",
+            modrinth_icons=root / "cache" / "modrinth-icons",
             icon=bundled_path("assets/icon.ico"),
+            steve_skin=bundled_path("assets/steve_skin.png"),
         )
 
-    def ensure_runtime_dirs(self, versions: tuple[str, ...]) -> None:
+    def ensure_runtime_dirs(self, _versions: tuple[str, ...]) -> None:
+        self.minecraft.mkdir(exist_ok=True)
+        self.profiles.mkdir(exist_ok=True)
         self.mods.mkdir(exist_ok=True)
         self.temp_mods.mkdir(exist_ok=True)
         self.logs.mkdir(exist_ok=True)
-        for version in versions:
-            (self.mods / f"fabric-{version}").mkdir(exist_ok=True)
+        self.cache.mkdir(exist_ok=True)
+        self.modrinth_icons.mkdir(exist_ok=True)

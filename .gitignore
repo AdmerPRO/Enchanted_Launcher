@@ -14,9 +14,12 @@ dist/
 *.spec
 
 # Runtime data
+.minecraft/
+cache/
 launcher_config.json
 logs/
 mods/
+profiles/
 
 # Local tooling
 .idea/

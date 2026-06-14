@@ -11,7 +11,8 @@ APP_NAME = "EnchantedLauncher"
 
 
 def build_command(project_root: Path, app_name: str) -> list[str]:
-    icon = project_root / "assets" / "icon.ico"
+    assets_dir = project_root / "assets"
+    icon = assets_dir / "icon.ico"
     data_separator = ";" if sys.platform.startswith("win") else ":"
     return [
         sys.executable,
@@ -26,7 +27,7 @@ def build_command(project_root: Path, app_name: str) -> list[str]:
         "--icon",
         str(icon),
         "--add-data",
-        f"{icon}{data_separator}assets",
+        f"{assets_dir}{data_separator}assets",
         "--collect-all",
         "customtkinter",
         "--distpath",
@@ -40,9 +41,13 @@ def build_command(project_root: Path, app_name: str) -> list[str]:
 
 
 def ensure_ready(project_root: Path) -> None:
-    icon = project_root / "assets" / "icon.ico"
+    assets_dir = project_root / "assets"
+    icon = assets_dir / "icon.ico"
+    steve_skin = assets_dir / "steve_skin.png"
     if not icon.exists():
         raise SystemExit(f"Missing icon: {icon}")
+    if not steve_skin.exists():
+        raise SystemExit(f"Missing Steve skin: {steve_skin}")
     if shutil.which("pyinstaller") is None:
         try:
             subprocess.run(
